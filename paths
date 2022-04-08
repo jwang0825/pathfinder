@@ -1,0 +1,171 @@
+import cv2
+import numpy as np
+
+def select_region(image, left, right, bottom, top, ignore_mask_color = 255):
+    mask = np.zeros_like(image)   
+
+    bottom_left  = [left, bottom]
+    top_left     = [left, top]
+    bottom_right = [right, bottom]
+    top_right    = [right, top]
+
+    vertices = np.array([[bottom_left, top_left, top_right, bottom_right]], dtype=np.int32)
+    cv2.fillPoly(mask, vertices, ignore_mask_color)
+    masked_image = cv2.bitwise_and(image, mask)
+    return masked_image
+
+def findVerticalCenter(input):
+
+	# input is a list of points
+	pts = [x[0] for x in input]
+
+	pts.sort(key = lambda x:x[0])
+
+	p1 = pts[0]
+	p2 = pts[len(pts) - 1]
+	midx = (p1[0] + p2[0])/2
+
+	if abs(p1[0] - p2[0]) > 500:
+		left=list(filter(lambda x: x[0] < midx,  pts))
+		right=list(filter(lambda x: x[0] >= midx,  pts))
+		
+		lave = np.average(left, axis=0)
+		rave = np.average(right, axis = 0)
+		ave = np.average([lave, rave], axis=0)
+
+		return ave
+	else:
+		return None
+
+def findHonCenter(input):
+
+	# input is a list of points
+	pts = [x[0] for x in input]
+
+	pts.sort(key = lambda x:x[1])
+
+	p1 = pts[0]
+	p2 = pts[len(pts) - 1]
+	midx = (p1[1] + p2[1])/2
+
+	if abs(p1[1] - p2[1]) > 500:
+		left=list(filter(lambda x: x[1] < midx,  pts))
+		right=list(filter(lambda x: x[1] >= midx,  pts))
+		
+		lave = np.average(left, axis=0)
+		rave = np.average(right, axis = 0)
+		ave = np.average([lave, rave], axis=0)
+
+		return ave
+	else:
+		return None
+
+def getContours(image):
+	img_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+	# apply binary thresholding
+	ret, thresh = cv2.threshold(img_gray, 127, 255, cv2.THRESH_BINARY)
+
+	contours, hierarchy = cv2.findContours(image=thresh, mode=cv2.RETR_TREE, method=cv2.CHAIN_APPROX_SIMPLE)
+	return contours
+
+def getContourBoundary(contours, left, right, bottom, top):
+	pts=[]
+
+	for index in range(len(contours)):
+		c = contours[index]
+
+		f = list(filter(lambda x: x[0][0] > left + 5 and x[0][0] < right - 5 and x[0][1] < bottom - 5 and x[0][1] > top + 5,  c))
+		if f and len(f) > 20:
+			pts.extend(f)
+	return pts;	
+
+def getVerticalCenters(pts, bottom, top):
+	centers=[]
+	for h in range(top + 10, bottom - 10, 20):
+		v = list(filter(lambda x: abs(x[0][1] - h) < 10, pts))
+		if v:
+			center = findVerticalCenter(v)
+			if center is not None:
+				centers.append(center)
+
+	return centers
+
+def getHorizonCenters(pts, left, right):
+	centers=[]
+
+	for h in range(left + 10, right - 10, 20):
+		v = list(filter(lambda x: abs(x[0][0] - h) < 10, pts))
+		if v:
+			center = findHonCenter(v)
+			if center is not None:
+				centers.append(center)
+
+	return centers
+
+def drawLine(image, pts):
+
+	startIndex = 0
+	while startIndex < len(pts) - 1:
+		endIndex = min(len(pts) - 1, startIndex + 4)
+
+		start=(int(pts[startIndex][0]), int(pts[startIndex][1]))
+		end=(int(pts[endIndex][0]), int(pts[endIndex][1]))
+		cv2.arrowedLine(image, start, end, (0, 255, 0), thickness = 20, tipLength = 0.5)
+		startIndex = endIndex
+
+
+def main(fileName):
+	image = cv2.imread(fileName)
+
+	rows, cols = image.shape[:2]
+
+	left = int(0.15 * cols)
+	right = int(0.85*cols)
+	bottom = int(0.85 * rows)
+	top = int(0.15 * rows)
+
+	if len(image.shape) > 2:
+		ignore_mask_color = (255,) * image.shape[2]
+	else:
+		ignore_mask_color = 255
+
+	# Select area to be used
+	selected = select_region(image, left, right, bottom, top, ignore_mask_color)
+
+	contours = getContours(selected)
+
+	boundaries = getContourBoundary(contours, left, right, bottom, top)
+
+	centers = getVerticalCenters(boundaries, bottom, top)
+	
+	centers.sort(key = lambda x:x[1], reverse = True)
+	drawLine(image, centers)
+
+	vertCenters = getHorizonCenters(boundaries, left, right)
+	vertCenters.sort(key = lambda x:x[1], reverse = True)
+
+	leftTurn = (centers[0][0] > centers[len(centers) - 1][0])
+	topX, topY = centers[len(centers) - 1]
+
+	if leftTurn:
+		r1 = list(filter(lambda x: x[0] < topX + 10 and x[1] < topY + 10, vertCenters))
+		drawLine(image, r1)
+		centers.extend(r1)
+	else:
+		r2 = list(filter(lambda x: x[0] > topX + 10 and x[1] < topY + 10, vertCenters))
+		drawLine(image, r2)
+		centers.extend(r2)
+
+
+	cv2.imshow("Output", image)
+	#cv2.imwrite("result-" + fileName, image)
+	cv2.waitKey(0)
+
+if __name__ == "__main__":
+	# Change file name between IMG-7593.jpeg and IMG-7594.jpeg
+	# If the image is not in the same directory as the python script, use fullpath as /Users/xwang/Downloads/IMG-7593.jpeg as the fileName
+    fileName = "IMG-7593.jpeg"
+    main(fileName)
+
+
